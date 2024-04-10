@@ -1,0 +1,277 @@
+{{#features}}
+	<li id="{{feature_ol_uid}}" class="inventaire item el-{{feature_ol_uid}}">
+        {{#observations}}
+            <p>
+                <b>Streams sélectionnés : </b> {{streamsNames}}
+            </p>
+        {{/observations}}
+        <div class="btn-group btn-group-justified" role="group" aria-label="...">
+            <div class="btn-group" role="group">
+                <button type="button" target="chart-container" class="btn btn-default activate pinfos">Chronologie</button>
+            </div>
+            <div class="btn-group" role="group">
+                <button type="button" target="global-container" class="btn btn-default pinfos">Infos. Parcelle</button>
+            </div>
+        </div>
+        <div class="sections">
+            <div class="sub-section chart-container chart" id="chart-container-{{feature_ol_uid}}" style="width: 100%">
+                <canvas id="chart-{{feature_ol_uid}}"></canvas>
+            </div>
+            <div class="sub-section global-container">
+                <h4>Informations sur la parcelle : {{idp}}</h4>
+                <div class="alert alert-warning" role="alert">
+                    <span class="glyphicon glyphicon-exclamation-sign" aria-hidden="true"></span>
+                    Vous devez commencer par sélectionner une année (cliquez sur la graphique).
+                </div>
+                <div class="flexible" style="display:none;">
+                    <div class="container-chart" id="cn-chart-{{feature_ol_uid}}"></div>
+                    <div class="card-infos">
+                        <div class="number">
+                            <object class="svg" data="apps/bosco/templates/img/calendar.svg"></object>
+                            <p class="title-number">
+                                <span id="year-{{feature_ol_uid}}"></span>
+                            </p>
+                        </div>
+                        <div class="number">
+                            <object class="svg" data="apps/bosco/templates/img/plant.svg"></object>
+                            <p class="title-number">
+                                <span id="cn-{{feature_ol_uid}}"></span>
+                            </p>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </li>
+    <script>
+
+    const statsOGC = mviewer.customComponents["stats-ogc"];
+
+    var chart = null ;
+    let thingName = "";
+    let thingDescription = "";
+    const mvLayer = mviewer.getLayer("{{mviewerid}}").layer;
+    const sensorthingsClass = mvLayer.sensorthings;
+    let featureWithObservations = mvLayer.sensorthings.features.filter(x => x.ol_uid == {{feature_ol_uid}});
+    const props = featureWithObservations[0].getProperties();
+
+    let streamsObs = sensorthingsClass.selectedStreams;
+    if(!streamsObs.length) {
+        streamsObs = props.sensorthings.observations.map(o => o.id);
+    }
+    const observations = props.sensorthings.observations
+    // DATASTREAM
+    let datastreams = props.sensorthings.datastreams;
+    let multidatastreams = props.sensorthings.multidatastreams;
+    let thing = props.sensorthings.thing;
+
+    var container = document.getElementById("chart-container-{{feature_ol_uid}}");
+
+    // newChart function
+    function newChart(title, subtitle) {
+       chart = Highcharts.stockChart(container, {
+           title: {
+               text: title
+           },
+           subtitle: {
+               text: subtitle
+           },
+           chart: {
+               zooming: {
+                   type: 'xy'
+               }
+           },
+           legend: {
+              enabled: true
+           },
+           rangeSelector: {
+               verticalAlign: 'top',
+               y: -35
+           },
+           plotOptions: {
+               series: {
+                    showInNavigator: true,
+               }
+           },
+           xAxis : {
+               type: 'datetime',
+                labels: {
+                formatter() {
+                    return ' year'
+                }
+                },
+                
+           }
+       })
+       return chart ;
+    }
+
+    // newSeries function
+    function newSeries (label,unitName,unitSymbol,datesValues,resultsValues) {
+        let datasets = [];
+        for (var i = 0 ; i < datesValues.length ; i++) {
+            datasets[i] = [datesValues[i],resultsValues[i]] ;
+        }
+        chart.addAxis({
+            id: unitName,
+            title:{
+                text: unitName
+            },
+            label:{
+                format: '{value} '+unitSymbol
+            },
+            opposite: true,
+            rotation: 10
+        });
+        chart.addSeries({
+            yAxis: unitName,
+            name: label,
+            data: datasets,
+            tooltip: {
+                valueDecimals: 2,
+                valueSuffix: unitSymbol
+            }
+        });
+    }
+
+    if (thing && thing.value && thing.value[0]) {
+        thingDescription = thing.value[0].description;
+        thingName = thing.value[0].name;
+    }
+    chart =  newChart(thingName,thingDescription);
+
+    // DATASTREAMS
+    if(datastreams && datastreams.length) {
+        streamsObs.map(data => {
+            let label = datastreams.filter(x => x.name === data)[0]?.name;
+            let description = datastreams.filter(x => x.name === data)[0]?.description;
+            let unitName = datastreams.filter(x => x.name === data)[0]?.unitOfMeasurement.name;
+            let unitSymbol = datastreams.filter(x => x.name === data)[0]?.unitOfMeasurement.symbol;
+            let result = _.find(observations, {name: data})?.result;
+            if(!data && !result) return;
+            let datesValues = result.map(o => new Date(o.phenomenonTime).getTime());
+            let resultsValues = result.map(o => o.result);
+            newSeries(label,unitName,unitSymbol,datesValues,resultsValues);
+
+        });
+    }
+
+    // MULTIDATASTREAMS
+    if(multidatastreams && multidatastreams.length) {
+        streamsObs.map(data => {
+            let dataObservations = _.find(observations, {name: data})?.result || [];
+            let yValues = dataObservations.map(o => o.result);
+            let unitOfMeasures = multidatastreams[0].unitOfMeasurements.map(x => x.name);
+            let unitSymbols = multidatastreams[0].unitOfMeasurements.map(x => x.symbol);
+            let unitDefinition = multidatastreams[0].unitOfMeasurements.map(x => x.definition);
+            let mapUnitDefinition = new Map();
+            let mapUnitSymbol = new Map();
+            for (var i = 0 ; i < unitOfMeasures.length ; i++) {
+                mapUnitSymbol.set (unitOfMeasures[i],unitSymbols[i]);
+                mapUnitDefinition.set (unitOfMeasures[i],unitDefinition[i]);
+            }
+            var zz=0
+            let unitOfMeasurementsDataset = unitOfMeasures.map(unit => {
+
+                let resultsValues = dataObservations.map(o => o.result[zz]);
+                zz+=1
+                let datesValues = dataObservations.map(o => new Date(o.phenomenonTime).getTime());
+                let unitName = mapUnitDefinition.get(unit); ;
+                let unitSymbol = mapUnitSymbol.get(unit); ;
+                newSeries(unit,unitName,unitSymbol,datesValues,resultsValues);
+            });
+        })
+    }
+
+
+    // change layer date on chart click
+    document.getElementById("chart-container-{{feature_ol_uid}}").addEventListener('click', e => {
+        const olUid = "{{feature_ol_uid}}";
+        const layerTimeFilter = document.getElementById("humidite_bzh-layer-timefilter");
+        const value = e?.point?.y;
+        const formatDate = Highcharts.dateFormat('%Y-%m-%d', e?.point?.x);
+        if(formatDate && layerTimeFilter) {
+            mviewer.setLayerTime("humidite_bzh", formatDate);
+            layerTimeFilter.value = formatDate;
+            const year = new Date(formatDate).getFullYear();
+            // requestCulture(year);
+            statsOGC.utils.requestCulture(year, {}, olUid)
+            statsOGC.utils.requestStats({
+                year_etude: year,
+                url_sensorthings: `https://frost.geosas.fr/bosco/v1.0/Datastreams(3)`
+            },
+            "cn-chart-{{feature_ol_uid}}",
+            "{{idp}}"
+            );
+            document.querySelector(".global-container .flexible").style.display = "";
+            document.querySelector(".global-container .alert").style.display = "none"
+        }
+    });
+    </script>
+
+    <script>
+    // button select
+    document.querySelectorAll(".el-{{feature_ol_uid}} .pinfos").forEach(x => {
+        x.addEventListener("click", ({target}) => {
+            document.querySelectorAll(".el-{{feature_ol_uid}} .pinfos").forEach(z => z.classList.remove("activate"));
+            target.classList.add("activate");
+            const panel = document.querySelectorAll(".activate")[0].attributes.target.value;
+            document.querySelectorAll(".sub-section").forEach(e => {e.style.display="none"});
+            const panelToShow = document.querySelectorAll(`.sub-section.${panel}`)[0];
+            if(panelToShow) {
+                panelToShow.style.display = "";
+            }
+        })
+    })
+    </script>
+    <style>
+    .pinfos {
+        border: 1px solid rgba(69,90,100, 0.2);
+    }
+    .pinfos.activate {
+        background-color: #455a64;
+        color: white;
+    }
+    .flexible {
+        display: flex;
+        flex-wrap: nowrap;
+        flex-direction: row;
+        align-items: center;
+        justify-content: flex-start;
+        align-content: center;
+    }
+    .number .svg{
+        max-width: 50px;
+    }
+    .number {
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+    }
+    #bottom-panel.active{
+        height: 480px !important;
+
+    }
+    .global-container .alert {
+        margin-top: 20px;
+    }
+    .card-infos {
+        display: flex;
+        flex-direction: column;
+        align-content: space-around;
+        flex-wrap: nowrap;
+        align-items: center;
+    }
+    .container-chart{
+        height: 350px;
+        max-width: 2000px;
+        min-width: 900px;
+    }
+    .number path {
+        fill: red;
+    }
+    .title-number {
+        font-size: 18px
+    }
+    </style>
+{{/features}}
